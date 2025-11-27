@@ -31,6 +31,17 @@ from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+# So, do I understand correctly that we import DATA_PATH from config, print it and 
+# then overwrite it with an environment variable? Wouldn't it be better to not 
+# don’t mix config and env var? 
+# we can use config:
+# from supervised_soup.config import DATA_PATH
+# DATA_PATH = Path(DATA_PATH)
+# or we can use the path from env:
+# DATA_PATH = Path(os.environ["DATA_PATH"])
+
+
 from supervised_soup.config import DATA_PATH
 
 print(DATA_PATH)
@@ -50,6 +61,18 @@ baseline_transforms = transforms.Compose([
         std=[0.229, 0.224, 0.225]
     )
 ])
+
+# shall we add specific transformations for the training?
+train_transforms = transforms.Compose([
+    transforms.RandomResizedCrop(224),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
+])
+
+val_transforms = baseline_transforms
+
 
 # loading the datasets for train and val with ImageFolder
 # ImageFolder automatically reads and decodes JPEGs
@@ -126,10 +149,19 @@ def show_image(img_tensor):
     """
     img = img_tensor.permute(1, 2, 0).numpy()      # CHW → HWC
     img = (img * 0.229 + 0.485)                    # undo normalization (std, mean)
+    # Doesn't the line 151 undo only the red channel? Shouldn't we do the same for green and blue channels?
+    # img = img * std + mean ?
     img = np.clip(img, 0, 1)
 
     plt.imshow(img)
     plt.axis("off")
+
+# I think the code below can lead to the memory problems (as it's the top-level code and 
+# every worker process will try to run it). Shall we put it inside a main guard? :
+# if __name__ == "__main__":
+#    images, labels = next(iter(train_loader))
+#    ...
+
 
 images, labels = next(iter(train_loader))
 # to plot 9 images
