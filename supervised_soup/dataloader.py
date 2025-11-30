@@ -22,155 +22,99 @@ https://docs.pytorch.org/vision/0.12/models.html
 
 """
 
-import os
 from pathlib import Path
 
+import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-import matplotlib.pyplot as plt
-import numpy as np
+import supervised_soup.config as config
 
 
-# So, do I understand correctly that we import DATA_PATH from config, print it and 
-# then overwrite it with an environment variable? Wouldn't it be better to not 
-# don’t mix config and env var? 
-# we can use config:
-# from supervised_soup.config import DATA_PATH
-# DATA_PATH = Path(DATA_PATH)
-# or we can use the path from env:
-# DATA_PATH = Path(os.environ["DATA_PATH"])
+# Normalizations expected for pre-trained models
+MEAN = [0.485, 0.456, 0.406]
+STD = [0.229, 0.224, 0.225]
 
-
-from supervised_soup.config import DATA_PATH
-
-print(DATA_PATH)
-
-# convert path string to Path
-DATA_PATH = Path(os.environ["DATA_PATH"])
-
-
-
-# transform images for baseline
-baseline_transforms = transforms.Compose([
+# transform images for validation (always the same)
+validation_transforms = transforms.Compose([
     transforms.Resize(256),       # resize shorter side to preserve ratio
     transforms.CenterCrop(224),   # shared size for ResNet
     transforms.ToTensor(),        # convert to float tensor [0,1]
     transforms.Normalize(         # standard ImageNet normalization (see docs)
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
+        mean=MEAN,
+        std=STD
     )
 ])
 
-# shall we add specific transformations for the training?
+# transform images for baseline (no augmentations)
+# since we are doing NO augmentations for the baseline, they are the same as validation transforms
+baseline_transforms = validation_transforms
+
+# transform images for later training (including augmentations)
+# we can add and adjust the particular augmentations later
 train_transforms = transforms.Compose([
     transforms.RandomResizedCrop(224),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225]),
+    transforms.Normalize(
+        mean=MEAN,
+        std=STD
+    )
 ])
 
-val_transforms = baseline_transforms
-
-
-# loading the datasets for train and val with ImageFolder
-# ImageFolder automatically reads and decodes JPEGs
-train_dataset = datasets.ImageFolder(
-    root=DATA_PATH / "train",
-    transform=baseline_transforms
-)
-
-val_dataset = datasets.ImageFolder(
-    root=DATA_PATH / "val",
-    transform=baseline_transforms
-)
-
-
-# create batches
-# not sure what batch size would be best for training on colab, we can adjust later
-BATCH_SIZE = 64  
-
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    # loads data in parallel
-    num_workers=4,
-    # should be true if using GPU, but false if CPU
-    pin_memory=True 
-)
-
-val_loader = DataLoader(
-    val_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=False,
-    num_workers=4,
-    pin_memory=True
-)
-
-
-## Test batch loading to test that:
-# Images have the shape ResNet-18 expects → [batch, 3, 224, 224]
-# Labels are integer class IDs → [batch]
-# Images are float32 → required by PyTorch models
-
-batch = next(iter(train_loader))
-images, labels = batch
-
-print("Batch loaded!")
-print("Images shape:", images.shape)
-print("Labels shape:", labels.shape)
-print("Dtype:", images.dtype)
-print("Min/Max:", images.min().item(), images.max().item())
-
-
-# looping through an epoch to test the dataloader for training
-for i, (images, labels) in enumerate(train_loader):
-    if i % 20 == 0:
-        print(f"Batch {i} OK:", images.shape, labels.shape)
-
-
-# print class names and mapping
-print("Classes:", train_dataset.classes)
-print("Class → Index mapping:", train_dataset.class_to_idx)
-
-
-
-# visualizing some images 
-
-def show_image(img_tensor):
+def get_dataloaders(
+    data_path=config.DATA_PATH,
+    batch_size=config.BATCH_SIZE,
+    num_workers=config.NUM_WORKERS,
+    with_augmentation=False,):
     """
-    Visualizes images and checks if 
-    - images are decoded correctly
-    - colors are correct (RGB, not grayscale or BGR)
-    - transforms didn’t break anything
-    - normalization can be reversed
+    Returns train_loader and val_loader.
+    - Sets the transforms based on with_augmentation.
+    - If with_augmentation=True we will use train_transforms (with augmentations)
+    - If with_augmenttion=False we use baseline transforms.
+    - Validation transforms are always the same.
+
+    - Example use for baseline:
+    - train_loader, val_loader = get_dataloaders(with_augmentation=False)
     """
-    img = img_tensor.permute(1, 2, 0).numpy()      # CHW → HWC
-    img = (img * 0.229 + 0.485)                    # undo normalization (std, mean)
-    # Doesn't the line 151 undo only the red channel? Shouldn't we do the same for green and blue channels?
-    # img = img * std + mean ?
-    img = np.clip(img, 0, 1)
 
-    plt.imshow(img)
-    plt.axis("off")
+    data_path = Path(data_path)
 
-# I think the code below can lead to the memory problems (as it's the top-level code and 
-# every worker process will try to run it). Shall we put it inside a main guard? :
-# if __name__ == "__main__":
-#    images, labels = next(iter(train_loader))
-#    ...
+    train_transform = train_transforms if with_augmentation else baseline_transforms
 
+    # loading the datasets for train and val with ImageFolder
+    # ImageFolder automatically reads and decodes JPEGs
+    train_dataset = datasets.ImageFolder(
+        root=data_path / "train",
+        transform=train_transform
+    )
 
-images, labels = next(iter(train_loader))
-# to plot 9 images
-plt.figure(figsize=(8, 8))
-for i in range(9):
-    plt.subplot(3, 3, i+1)
-    show_image(images[i].cpu())
-plt.show()
+    val_dataset = datasets.ImageFolder(
+        root=data_path / "val",
+        transform=validation_transforms
+    )
 
+    # basically checks if GPU is available for training
+    pin = torch.cuda.is_available()
 
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        # loads data in parallel
+        num_workers=num_workers,
+        # should be true if using GPU, but false if CPU, PIN automatially sets it now depending whether CUDA is available
+        pin_memory=pin,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin,
+    )
+
+    return train_loader, val_loader
 
 
