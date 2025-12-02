@@ -27,8 +27,20 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+# Needed for seed 
+# import random
+# import numpy as np
 
 import supervised_soup.config as config
+
+
+# Shall we also add a seed worker function for reproducibility?
+# Each worker gets a different, but reproducible seed
+# def seed_worker(worker_id: int):
+#    worker_seed = torch.initial_seed() % 2**32
+#    np.random.seed(worker_seed)
+#    random.seed(worker_seed)
+
 
 
 # Normalizations expected for pre-trained models
@@ -66,12 +78,14 @@ def get_dataloaders(
     data_path=config.DATA_PATH,
     batch_size=config.BATCH_SIZE,
     num_workers=config.NUM_WORKERS,
-    with_augmentation=False,):
+    with_augmentation=False,
+    # seed: int = 42,
+):
     """
     Returns train_loader and val_loader.
     - Sets the transforms based on with_augmentation.
     - If with_augmentation=True we will use train_transforms (with augmentations)
-    - If with_augmenttion=False we use baseline transforms.
+    - If with_augmentation=False we use baseline transforms.
     - Validation transforms are always the same.
 
     - Example use for baseline:
@@ -81,6 +95,14 @@ def get_dataloaders(
     data_path = Path(data_path)
 
     train_transform = train_transforms if with_augmentation else baseline_transforms
+    # persistent = (num_workers > 0)  
+    # so, I found this function that can speed the loading
+    # the point is that normally, at the end of every epoch, the DataLoader kills the worker processes.
+    # At the start of the next epoch, it creates them again. If we keep them alive it will be less costly for RAM
+    # https://discuss.pytorch.org/t/what-are-the-dis-advantages-of-persistent-workers/102110
+
+    
+
 
     # loading the datasets for train and val with ImageFolder
     # ImageFolder automatically reads and decodes JPEGs
@@ -97,6 +119,11 @@ def get_dataloaders(
     # basically checks if GPU is available for training
     pin = torch.cuda.is_available()
 
+    # seed
+    # g = torch.Generator()
+    # g.manual_seed(seed)
+
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -105,6 +132,7 @@ def get_dataloaders(
         num_workers=num_workers,
         # should be true if using GPU, but false if CPU, PIN automatially sets it now depending whether CUDA is available
         pin_memory=pin,
+        # persistent_workers=persistent,
     )
 
     val_loader = DataLoader(
