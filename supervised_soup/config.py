@@ -7,22 +7,62 @@ from supervised_soup.config import DATA_PATH, RESULTS_PATH
 
 """
 
-# config for the DATA_PATH
 import os
+import sys
+
+from pathlib import Path
 from dotenv import load_dotenv
+import torch
 
 load_dotenv()
 
-DATA_PATH = os.getenv("DATA_PATH")
 
-if not DATA_PATH or not os.path.exists(DATA_PATH):
-    print("Dataset path not found. Please check your .env file or Drive mount.")
-else:
-    print(f"Using dataset at: {DATA_PATH}")
+
+def validate_path(path: Path) -> Path:
+    """Validates the data path and raises a FileNotFoundError if not found."""
+    if not path or not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset path not found: {path}. Please check DATA_PATH in .env or Drive mount.")
+    else:
+        print(f"Using the following data path: {path}")
+    return path
+
+
+# get the data path from env
+DATA_PATH = Path(os.getenv("DATA_PATH"))
+# validate the path
+DATA_PATH = validate_path(DATA_PATH)
 
 # config for the RESULTS_PATH
-RESULTS_PATH = os.getenv("RESULTS_PATH", "results")
-
+RESULTS_PATH = Path(os.getenv("RESULTS_PATH", "results"))
 # create results directory if it doesn't exist
 os.makedirs(RESULTS_PATH, exist_ok=True)
 print(f"Results will be saved to: {os.path.abspath(RESULTS_PATH)}")
+
+CHECKPOINTS_PATH = RESULTS_PATH / "checkpoints"
+LOGS_PATH = RESULTS_PATH / "logs"
+VISUALIZATIONS_PATH = RESULTS_PATH / "visualizations"
+
+
+
+# we might want to adjust these
+# we can set something like this and then override in .env. Just a suggestion::
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "64"))     
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", "4"))
+# BATCH_SIZE = 64
+# NUM_WORKERS = 4
+
+
+# Check if GPU is available for training
+CUDA = torch.cuda.is_available()  
+print(f"Using CUDA: {CUDA}")
+# set the device
+DEVICE = torch.device("cuda" if CUDA else "cpu")
+
+# test if running on colab
+COLAB = 'google.colab' in sys.modules
+if COLAB:
+    print("Running on Colab. Make sure configurations are properly adjusted.")
+
+
+# default seed for reproducibility
+SEED = 42
