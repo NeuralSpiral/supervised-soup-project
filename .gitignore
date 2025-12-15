@@ -1,7 +1,8 @@
 
-# folers
+# folders
 data/
 results/
+test_results
 
 # python stf
 __pycache__/

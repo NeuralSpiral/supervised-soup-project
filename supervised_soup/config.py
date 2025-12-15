@@ -41,6 +41,9 @@ print(f"Results will be saved to: {os.path.abspath(RESULTS_PATH)}")
 CHECKPOINTS_PATH = RESULTS_PATH / "checkpoints"
 LOGS_PATH = RESULTS_PATH / "logs"
 VISUALIZATIONS_PATH = RESULTS_PATH / "visualizations"
+CHECKPOINTS_PATH.mkdir(parents=True, exist_ok=True)
+LOGS_PATH.mkdir(parents=True, exist_ok=True)
+VISUALIZATIONS_PATH.mkdir(parents=True, exist_ok=True)
 
 
 

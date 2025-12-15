@@ -16,4 +16,5 @@ torchmetrics==1.4.0
 wandb==0.22.2
 python-dotenv==1.2.1
 tqdm==4.67.1
+scikit-learn==1.6.1
 

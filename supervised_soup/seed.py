@@ -15,6 +15,7 @@ def set_seed(seed: int):
     """
     Sets a global seed for reproducibility in random, numpy, and torch.
     Adjusts Pytorch settings to avoid randomness.
+    Should be called at the start of training scripts.
     """
 
     # set global seed
