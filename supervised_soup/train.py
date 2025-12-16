@@ -171,7 +171,6 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
 
     ## initialize wandb
     wandb.init(
-        entity="supervised-soup",
         project="baseline-resnet-18",
         name=f"baseline_lr{lr}_aug{with_augmentation}",
         config={
