@@ -172,7 +172,7 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
     ## initialize wandb
     wandb.init(
         project="baseline-resnet-18",
-        entity="neural-spi",
+        entity="neural-spi-university",
         name=f"baseline_lr{lr}_aug{with_augmentation}",
         config={
             "model": "resnet18",
