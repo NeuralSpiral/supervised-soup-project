@@ -50,9 +50,9 @@ VISUALIZATIONS_PATH.mkdir(parents=True, exist_ok=True)
 # we might want to adjust these
 # we can set something like this and then override in .env. Just a suggestion::
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "64"))     
-NUM_WORKERS = int(os.getenv("NUM_WORKERS", "4"))
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", "2"))
 # BATCH_SIZE = 64
-# NUM_WORKERS = 4
+# NUM_WORKERS = 2
 
 
 # Check if GPU is available for training
