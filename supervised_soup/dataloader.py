@@ -120,7 +120,7 @@ def get_dataloaders(
         pin_memory=pin,
         persistent_workers=num_workers > 0,
         worker_init_fn=seed_module.seed_worker,
-        generator=generator
+        generator=generator,
         drop_last=False,
     )
 
