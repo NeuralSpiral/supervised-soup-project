@@ -121,6 +121,7 @@ def get_dataloaders(
         persistent_workers=num_workers > 0,
         worker_init_fn=seed_module.seed_worker,
         generator=generator
+        drop_last=False,
     )
 
     val_loader = DataLoader(
@@ -130,6 +131,7 @@ def get_dataloaders(
         num_workers=num_workers,
         pin_memory=pin,
         persistent_workers=num_workers > 0,
+        drop_last=False,
     )
 
     return train_loader, val_loader
