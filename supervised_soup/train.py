@@ -68,6 +68,44 @@ def per_class_accuracy(cm):
     return acc
 
 
+# log best cm (best epoch)
+def log_best_confusion_matrix(
+    *,
+    y_true,
+    y_pred,
+    class_names,
+    epoch,
+):
+    """
+    Logs the best confusion matrix to W&B and saves it as an artifact.
+    """
+    # log visualization
+    wandb.log({
+        "best/confusion_matrix": wandb.plot.confusion_matrix(
+            y_true=y_true,
+            preds=y_pred,
+            class_names=class_names,
+        )
+    })
+
+    # save raw cm
+    cm = confusion_matrix(y_true, y_pred)
+    cm_path = os.path.join(wandb.run.dir, "best_confusion_matrix.npy")
+    np.save(cm_path, cm)
+
+    # artifact
+    cm_artifact = wandb.Artifact(
+        name="best-confusion-matrix",
+        type="evaluation",
+        description=f"Validation confusion matrix at best epoch {epoch}",
+    )
+    cm_artifact.add_file(cm_path)
+    wandb.log_artifact(cm_artifact)
+
+    # metadata
+    wandb.run.summary["best_epoch"] = epoch
+
+
 # training loop
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     """ Trains the model for one epoch
@@ -197,7 +235,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "batch_size": config.BATCH_SIZE,
             "augmentation": with_augmentation,
             "num_classes": 10,
-            "seed": config.SEED,
+            "seed": seed,
         },
     )
     # wandb run-level metadata
@@ -228,9 +266,16 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
     # for montiroing when overfitting starts
     # overfitting defined as 5 consecutive epochs without validation improvement
-    patience = 5        
-    best_val_metric = float("inf")
+    patience = 5 
+    best_val_loss = float("inf")       
+    best_val_metric = best_val_loss
     epochs_since_improvement = 0
+
+    best_epoch = None
+    best_cm = None
+    best_val_labels = None
+    best_val_predictions = None
+
 
 
     for epoch in range(epochs):
@@ -285,12 +330,26 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
         wandb.log(log_data, step=epoch)
 
-        # Save best checkpoint (with wandb)
-        if val_acc > best_val_acc:
+        # Save best checkpoint and cm (with wandb)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
             best_val_acc = val_acc
-            save_checkpoint(model, optimizer, epoch, val_loss)
-            wandb.run.summary["best_val_acc"] = best_val_acc
+            best_epoch = epoch + 1  
 
+            # best confusion matrix
+            best_cm = val_cm
+            best_val_labels = val_labels
+            best_val_predictions = val_predictions
+
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch,
+                val_loss,
+            )
+
+            wandb.run.summary["best_val_acc"] = best_val_acc
+            wandb.run.summary["best_epoch"] = best_epoch          
 
 
         # prints to command line
@@ -313,27 +372,14 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         history["val_cm"].append(val_cm)
 
 
-    # confusion matrix log (once per run)
-    final_cm = confusion_matrix(val_labels, val_predictions)
-
-    wandb.log({
-        "val/confusion_matrix": wandb.plot.confusion_matrix(
-            y_true=val_labels,
-            preds=val_predictions,
+    # log cm once for best epoch
+    if best_val_labels is not None:
+        log_best_confusion_matrix(
+            y_true=best_val_labels,
+            y_pred=best_val_predictions,
             class_names=[f"class_{i}" for i in range(10)],
+            epoch=best_epoch,
         )
-    })
-    # save cm inside wandb run 
-    cm_path = os.path.join(wandb.run.dir, "confusion_matrix.npy")
-    np.save(cm_path, final_cm)
-    # log cm as wandb artifact
-    cm_artifact = wandb.Artifact(
-        name="confusion-matrix",
-        type="evaluation",
-        description="Final validation confusion matrix"
-    )
-    cm_artifact.add_file(cm_path)
-    wandb.log_artifact(cm_artifact)
 
     wandb.finish()
     print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
