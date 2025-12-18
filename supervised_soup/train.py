@@ -5,6 +5,7 @@ Provides a run_training function.
 
 import os
 import time
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -282,12 +283,6 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             log_data[f"val/per_class_acc/class_{cls}"] = acc
 
 
-        log_data["val/confusion_matrix"] = wandb.plot.confusion_matrix(
-            y_true=val_labels,
-            preds=val_predictions,
-            class_names=[f"class_{i}" for i in range(10)],
-        )
-
         wandb.log(log_data, step=epoch)
 
         # Save best checkpoint (with wandb)
@@ -318,7 +313,27 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         history["val_cm"].append(val_cm)
 
 
+    # confusion matrix log (once per run)
+    final_cm = confusion_matrix(val_labels, val_predictions)
 
+    wandb.log({
+        "val/confusion_matrix": wandb.plot.confusion_matrix(
+            y_true=val_labels,
+            preds=val_predictions,
+            class_names=[f"class_{i}" for i in range(10)],
+        )
+    })
+    # save cm inside wandb run 
+    cm_path = os.path.join(wandb.run.dir, "confusion_matrix.npy")
+    np.save(cm_path, final_cm)
+    # log cm as wandb artifact
+    cm_artifact = wandb.Artifact(
+        name="confusion-matrix",
+        type="evaluation",
+        description="Final validation confusion matrix"
+    )
+    cm_artifact.add_file(cm_path)
+    wandb.log_artifact(cm_artifact)
 
     wandb.finish()
     print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
