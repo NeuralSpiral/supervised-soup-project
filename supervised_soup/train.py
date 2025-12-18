@@ -150,7 +150,7 @@ def validate_one_epoch(model, dataloader, criterion, device):
 
 
 # the * makes teh keyword arguments mandatory
-def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, is_frozen: bool =True,  lr: float = 1e-3, device: str = config.DEVICE,
+def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, is_frozen: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
                     # wandb (experiment metadata)
                     wandb_project: str = "x-AI-Proj-ImageClassification",
                     wandb_group: str | None = None,
@@ -170,7 +170,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         run_training(epochs=10, lr=1e-3, wandb_group="baseline_frozen", wandb_name="seed42_lr1e-3_noaug")
     """
     # set seed for reproducibility
-    seed_module.set_seed(config.SEED)
+    seed_module.set_seed(seed)
 
     # load Data
     train_loader, val_loader = get_dataloaders(
