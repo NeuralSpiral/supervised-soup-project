@@ -190,9 +190,10 @@ def validate_one_epoch(model, dataloader, criterion, device):
     true_class_labels = np.array(all_labels)
     predicted_class_probabilities = np.array(all_predicted_probabilities)
 
+    num_classes=10
     true_labels_one_hot = label_binarize(
         true_class_labels,
-        classes=list(range(num_classes=10))
+        classes=list(range(num_classes))
     )
 
     # ROC-AUC macro (one-vs-rest)
