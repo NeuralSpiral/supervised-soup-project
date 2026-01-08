@@ -276,11 +276,6 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr, momentum=0.9,)
 
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=1e-6, last_epoch=start_epoch - 1)
-
-
-
     # for resuming from last checkpoint
     start_epoch = 0  # default
     if current_last_checkpoint_path is not None and os.path.exists(current_last_checkpoint_path):
@@ -289,6 +284,9 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         model.load_state_dict(checkpoint["model_state"])
         optimizer.load_state_dict(checkpoint["optimizer_state"])
         start_epoch = checkpoint["epoch"] + 1
+    
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=epochs, eta_min=1e-6, last_epoch=start_epoch - 1)
 
 
 
