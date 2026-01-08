@@ -19,6 +19,8 @@ import supervised_soup.config as config
 from supervised_soup import seed as seed_module
 
 from sklearn.metrics import accuracy_score, f1_score, top_k_accuracy_score, confusion_matrix
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import label_binarize
 
 
 
@@ -184,7 +186,24 @@ def validate_one_epoch(model, dataloader, criterion, device):
     epoch_top5 = float(top_k_accuracy_score(all_labels, all_predicted_probabilities, k=5))
     epoch_cm = confusion_matrix(all_labels, all_predictions)
 
-    return epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, all_labels, all_predictions
+    # ROC-AUC compute
+    true_class_labels = np.array(all_labels)
+    predicted_class_probabilities = np.array(all_predicted_probabilities)
+
+    true_labels_one_hot = label_binarize(
+        true_class_labels,
+        classes=list(range(num_classes=10))
+    )
+
+    # ROC-AUC macro (one-vs-rest)
+    roc_auc_macro_ovr = roc_auc_score(
+        true_labels_one_hot,
+        predicted_class_probabilities,
+        average="macro",
+        multi_class="ovr",
+    )
+
+    return epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, roc_auc_macro_ovr, all_labels, all_predictions
 
 
 # the * makes teh keyword arguments mandatory
@@ -284,7 +303,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         # loss and accuracy for training
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         # get loss and other metrics for validation
-        val_loss, val_acc, val_f1, val_top5, val_cm, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
+        val_loss, val_acc, val_f1, val_top5, val_cm, val_roc_auc_macro, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
 
         # update overfitting
         current_metric = val_loss 
@@ -313,6 +332,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "val/accuracy": val_acc,
             "val/f1": val_f1,
             "val/top5": val_top5,
+            "val/roc_auc_macro": val_roc_auc_macro,
             "lr": current_lr,
             "epoch_time": time.time() - t0,
         }
