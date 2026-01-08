@@ -212,7 +212,9 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                     wandb_project: str = "x-AI-Proj-ImageClassification",
                     wandb_group: str | None = None,
                     wandb_name: str | None = None,
-                    run_type: str = "baseline", ):
+                    run_type: str = "baseline",
+                     # for resuming from last checkpoint, in case
+                     current_last_checkpoint_path: str | None = None ):
     """
     Main training function:
     - loads dataloaders
@@ -275,7 +277,20 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         lr=lr, momentum=0.9,)
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=1e-6)
+            optimizer, T_max=epochs, eta_min=1e-6, last_epoch=start_epoch - 1)
+
+
+
+    # for resuming from last checkpoint
+    start_epoch = 0  # default
+    if current_last_checkpoint_path is not None and os.path.exists(current_last_checkpoint_path):
+        print(f"Resuming training from checkpoint: {current_last_checkpoint_path}")
+        checkpoint = torch.load(current_last_checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        start_epoch = checkpoint["epoch"] + 1
+
+
 
     best_val_acc = 0.0
     history = {
@@ -297,7 +312,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
 
 
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         t0 = time.time()
 
         # loss and accuracy for training
@@ -349,6 +364,16 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
 
         wandb.log(log_data, step=epoch)
+
+        # save the last checkpoint (overwritten each epoch)
+        current_last_checkpoint_path = os.path.join(wandb.run.dir, "last_model.pt")
+        torch.save({
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "val_loss": val_loss,
+            "val_accuracy": val_acc,
+        }, current_last_checkpoint_path)
 
         # Save best checkpoint and cm (with wandb)
         if val_loss < best_val_loss:
