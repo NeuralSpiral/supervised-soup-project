@@ -351,7 +351,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         wandb.log(log_data, step=epoch)
 
         # save the last checkpoint (overwritten each epoch)
-        current_last_checkpoint_path = os.path.join(wandb.run.dir, "last_model.pt")
+        current_last_checkpoint_path = os.path.join(wandb.run.dir, f"last_model_{wandb.run.name}.pt")
         torch.save({
             "epoch": epoch,
             "model_state": model.state_dict(),
