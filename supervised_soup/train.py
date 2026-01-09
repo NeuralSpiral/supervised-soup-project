@@ -17,44 +17,64 @@ import wandb
 from supervised_soup.dataloader import get_dataloaders
 import supervised_soup.config as config
 from supervised_soup import seed as seed_module
+from supervised_soup.models.model import build_model
+
 
 from sklearn.metrics import accuracy_score, f1_score, top_k_accuracy_score, confusion_matrix
+from sklearn.metrics import roc_auc_score
+from sklearn.preprocessing import label_binarize
 
 
 
-# add NUM_CLASSES, EPOCHS, LR, OPTIMIZER to config?
+# add EPOCHS, LR, OPTIMIZER to config?
 
 
+def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1_macro, val_top5, val_roc_auc_macro, per_class_acc):
+    """
+    - Saves the best model checkpoint and uploads it as a wandb artifact.
+    - updates wandb summary with key metrics for the best epoch.
+    """
 
+    # path in run directory (temporary)
+    checkpoint_path = os.path.join(wandb.run.dir, f"best_model_{wandb.run.name}.pt")
 
-# initializing model (Resnet-18)
-# should be in model.py, not done in train
-def build_model(num_classes=10, pretrained=True, freeze_layers=True):
-    """Returns a ResNet-18 model with the last layer replaced for num_classes."""
-    # not sure if V1 or V2 is better for baseline, or makes any difference
-    weights = models.ResNet18_Weights.IMAGENET1K_V1  
-    model = models.resnet18(weights=weights if pretrained else None)
-
-    # to freeze or not to freeze
-    if freeze_layers:
-        for param in model.parameters():
-            param.requires_grad = False
-
-    # replace the final layer
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
-
-
-def save_checkpoint(model, optimizer, epoch, val_loss):
+    # Save checkpoint
     checkpoint = {
         "epoch": epoch,
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "val_loss": val_loss,
+        "val_acc": val_acc,
+        "val_f1_macro": val_f1_macro,
+        "val_top5": val_top5,
+        "roc_auc_macro": val_roc_auc_macro,
+        "per_class_acc": per_class_acc,
     }
+    torch.save(checkpoint, checkpoint_path)
 
-    path = os.path.join(wandb.run.dir, "best_model.pt")
-    torch.save(checkpoint, path)
+    # Create wandb artifact (permanent)
+    # We can use it for later analysis, or Grad-CAM
+    artifact = wandb.Artifact(
+        name=f"best_model_{wandb.run.name}",
+        type="model",
+        description=f"Best model at epoch {epoch}",
+    )
+    artifact.add_file(checkpoint_path)
+    wandb.log_artifact(artifact)
+
+
+    # log per-class accuracy to wandb summary
+    for cls, acc in per_class_acc.items():
+        wandb.run.summary[f"best/{cls}_acc"] = acc
+
+    # log other metrics to wandb summary
+    wandb.run.summary["best_val_loss"] = val_loss
+    wandb.run.summary["best_val_acc"] = val_acc
+    wandb.run.summary["best_val_f1_macro"] = val_f1_macro
+    wandb.run.summary["best_val_top5"] = val_top5
+    wandb.run.summary["best_val_roc_auc_macro"] = val_roc_auc_macro
+    wandb.run.summary["best_epoch"] = epoch
+
 
 
 # add per class acc
@@ -150,7 +170,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
 @torch.no_grad()
 def validate_one_epoch(model, dataloader, criterion, device):
     """ Validates the model for one epoch
-    currrently returns: epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm"""
+    currrently returns: epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, roc_auc_macro_ovr, all_labels, all_predictions"""
+    
     model.eval()
     running_loss = 0.0
 
@@ -180,27 +201,50 @@ def validate_one_epoch(model, dataloader, criterion, device):
     # compute metrics for epoch
     epoch_loss = running_loss / len(dataloader.dataset)
     epoch_acc = accuracy_score(all_labels, all_predictions)
-    epoch_f1 = f1_score(all_labels, all_predictions, average="macro")
+    epoch_macro_f1 = f1_score(all_labels, all_predictions, average="macro")
     epoch_top5 = float(top_k_accuracy_score(all_labels, all_predicted_probabilities, k=5))
     epoch_cm = confusion_matrix(all_labels, all_predictions)
 
-    return epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, all_labels, all_predictions
+    # ROC-AUC compute
+    true_class_labels = np.array(all_labels)
+    predicted_class_probabilities = np.array(all_predicted_probabilities)
 
+    true_labels_one_hot = label_binarize(
+        true_class_labels,
+        classes=list(range(config.NUM_CLASSES))
+    )
+
+    # ROC-AUC macro (one-vs-rest)
+    roc_auc_macro_ovr = roc_auc_score(
+        true_labels_one_hot,
+        predicted_class_probabilities,
+        average="macro",
+        multi_class="ovr",
+    )
+
+    return epoch_loss, epoch_acc, epoch_macro_f1, epoch_top5, epoch_cm, roc_auc_macro_ovr, all_labels, all_predictions
+
+
+# TODO: refactor optimizer and scheduler creation to work with EXPERIMENT_CONFIG
 
 # the * makes teh keyword arguments mandatory
-def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, is_frozen: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
+def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, freeze_layers: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
                     # wandb (experiment metadata)
                     wandb_project: str = "x-AI-Proj-ImageClassification",
                     wandb_group: str | None = None,
                     wandb_name: str | None = None,
-                    run_type: str = "baseline", ):
+                    run_type: str = "baseline",
+                     # for resuming from last checkpoint, in case
+                     current_last_checkpoint_path: str | None = None ):
     """
     Main training function:
     - loads dataloaders
     - constructs model
     - loops over epochs
-    - logs losses/accuracy
-    - saves best checkpoint
+    - initializes wandb and tracks metrics
+    - logs losses/accuracy, f1, cm, roc-auc
+    - saves best checkpoint (currently based on val_loss)
+        # change to macroF1?
 
     Example use:
         from supervised_soup.train import run_training
@@ -223,8 +267,8 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         name=wandb_name if wandb_name else f"{run_type}_lr{lr}_aug{with_augmentation}",
         config={
             "model": "resnet18",
-            "pretrained": True,
-            "freeze_layers": True,
+            "pretrained": pretrained,
+            "freeze_layers": freeze_layers,
             "loss": "CrossEntropyLoss",
             "optimizer": "SGD",
             "momentum": 0.9,
@@ -234,7 +278,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "epochs": epochs,
             "batch_size": config.BATCH_SIZE,
             "augmentation": with_augmentation,
-            "num_classes": 10,
+            "num_classes": config.NUM_CLASSES,
             "seed": seed,
         },
     )
@@ -244,7 +288,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     wandb.run.summary["frozen_backbone"] = True
 
 
-    model = build_model(num_classes=10, pretrained=pretrained, freeze_layers=is_frozen)
+    model = build_model(num_classes=config.NUM_CLASSES, pretrained=pretrained, freeze_layers=freeze_layers)
     model.to(device)
 
     wandb.watch(model, log="gradients", log_freq=100)
@@ -255,13 +299,24 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr, momentum=0.9,)
 
+    # for resuming from last checkpoint
+    start_epoch = 0  # default
+    if current_last_checkpoint_path is not None and os.path.exists(current_last_checkpoint_path):
+        print(f"Resuming training from checkpoint: {current_last_checkpoint_path}")
+        checkpoint = torch.load(current_last_checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        start_epoch = checkpoint["epoch"] + 1
+    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=1e-6)
+        optimizer, T_max=epochs, eta_min=1e-6, last_epoch=start_epoch - 1)
+
+
 
     best_val_acc = 0.0
     history = {
         "train_loss": [], "train_acc": [],
-        "val_loss": [], "val_acc": [], "val_f1": [], "val_top5": [], "val_cm": []
+        "val_loss": [], "val_acc": [], "val_f1_macro": [], "val_top5": [], "val_cm": [], "val_roc_auc_macro": []
     }
 
     # for montiroing when overfitting starts
@@ -278,13 +333,13 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
 
 
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         t0 = time.time()
 
         # loss and accuracy for training
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         # get loss and other metrics for validation
-        val_loss, val_acc, val_f1, val_top5, val_cm, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
+        val_loss, val_acc, val_f1_macro, val_top5, val_cm, val_roc_auc_macro, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
 
         # update overfitting
         current_metric = val_loss 
@@ -311,8 +366,9 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "train/accuracy": train_acc,
             "val/loss": val_loss,
             "val/accuracy": val_acc,
-            "val/f1": val_f1,
+            "val/f1_macro": val_f1_macro,
             "val/top5": val_top5,
+            "val/roc_auc_macro": val_roc_auc_macro,
             "lr": current_lr,
             "epoch_time": time.time() - t0,
         }
@@ -330,7 +386,17 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
         wandb.log(log_data, step=epoch)
 
-        # Save best checkpoint and cm (with wandb)
+        # save the last checkpoint (overwritten each epoch)
+        current_last_checkpoint_path = os.path.join(wandb.run.dir, f"last_model_{wandb.run.name}.pt")
+        torch.save({
+            "epoch": epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "val_loss": val_loss,
+            "val_accuracy": val_acc,
+        }, current_last_checkpoint_path)
+
+        # Save best checkpoint and cm and store as artifact (with wandb)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_val_acc = val_acc
@@ -346,6 +412,19 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                 optimizer,
                 epoch,
                 val_loss,
+                val_acc,
+                val_f1_macro,
+                val_top5,
+                val_roc_auc_macro,
+                per_class_acc,  # pass from run_training
+            )
+
+            # log cm for best epoch
+            log_best_confusion_matrix(
+                y_true=best_val_labels,
+                y_pred=best_val_predictions,
+                class_names=[f"class_{i}" for i in range(10)],
+                epoch=best_epoch,
             )
 
             wandb.run.summary["best_val_acc"] = best_val_acc
@@ -355,9 +434,10 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         # prints to command line
         print(
             f"Epoch [{epoch+1}/{epochs}] "
-            f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} "
+            f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | "
             f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
-            f"F1: {val_f1:.4f} | Top-5: {val_top5:.4f} "
+            f"F1: {val_f1_macro:.4f} | Top-5: {val_top5:.4f} | "
+            f"ROC-AUC Macro: {val_roc_auc_macro:.4f} | "
             f"LR: {current_lr:.6f} | "
             f"Time: {time.time() - t0:.1f}s"
         )
@@ -367,22 +447,16 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         history["train_acc"].append(train_acc)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
-        history["val_f1"].append(val_f1)
+        history["val_f1_macro"].append(val_f1_macro)
         history["val_top5"].append(val_top5)
         history["val_cm"].append(val_cm)
+        history["val_roc_auc_macro"].append(val_roc_auc_macro)
 
 
-    # log cm once for best epoch
-    if best_val_labels is not None:
-        log_best_confusion_matrix(
-            y_true=best_val_labels,
-            y_pred=best_val_predictions,
-            class_names=[f"class_{i}" for i in range(10)],
-            epoch=best_epoch,
-        )
+
 
     wandb.finish()
-    print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
+    print(f"Training complete. Best Validation Acc was = {best_val_acc:.4f}.  Best Validation Loss was = {best_val_loss:.4f}")
     return model, history
 
 

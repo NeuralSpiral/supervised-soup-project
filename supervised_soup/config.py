@@ -69,3 +69,6 @@ if COLAB:
 
 # default seed for reproducibility
 SEED = 42
+
+# Number of classes (should never change)
+NUM_CLASSES = 10
