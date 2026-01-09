@@ -188,7 +188,8 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                     wandb_name: str | None = None,
                     run_type: str = "baseline",
                      # for resuming from last checkpoint, in case
-                    resume: bool = False):
+                    resume: bool = False,
+                    experiment_config=None):
     """
     Main training function:
     - loads dataloaders
@@ -235,6 +236,10 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "seed": seed,
         },
     )
+    # update wandb config to include additional keys specified in notebook
+    if experiment_config is not None:
+        wandb.config.update(experiment_config, allow_val_change=False)
+
 
     # This sets the label on x-axis in wandb plots from the default step to epoch
     # We won't need to manually change it in the UI anymore
