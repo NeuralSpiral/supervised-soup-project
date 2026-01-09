@@ -11,8 +11,7 @@ import os
 import torch
 import wandb
 
-# the * in the function signatures forces keyword arguments, 
-# I like it, should have used this consistently from the start tbh
+
 def save_best_checkpoint(
     *,
     model: torch.nn.Module,
