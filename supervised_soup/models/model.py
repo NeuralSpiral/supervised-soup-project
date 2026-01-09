@@ -6,10 +6,10 @@ Provides a build_model function that returns a ResNet-18 model with the last lay
 
 import torch.nn as nn
 from torchvision import models
-
+import supervised_soup.config as config
 
 # Build the model
-def build_model(num_classes=10, pretrained=True, freeze_layers=True):
+def build_model(num_classes=config.NUM_CLASSES, pretrained=True, freeze_layers=True):
     """Returns a ResNet-18 model with the last layer replaced for num_classes.
     - If pretrained = True, loads pretrained Imagenet weights (V1)
     - If freeze layers = True, all layers will be frozen except the final layer

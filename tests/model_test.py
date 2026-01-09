@@ -6,7 +6,7 @@ Run in command line from project root with: python tests/model_test.py
 """
 
 import torch
-from supervised_soup.models.resnet18 import build_model
+from models.model import build_model
 from supervised_soup import config
 from supervised_soup.dataloader import get_dataloaders
 

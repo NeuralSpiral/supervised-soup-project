@@ -17,6 +17,8 @@ import wandb
 from supervised_soup.dataloader import get_dataloaders
 import supervised_soup.config as config
 from supervised_soup import seed as seed_module
+from supervised_soup.models.model import build_model
+
 
 from sklearn.metrics import accuracy_score, f1_score, top_k_accuracy_score, confusion_matrix
 from sklearn.metrics import roc_auc_score
@@ -24,27 +26,7 @@ from sklearn.preprocessing import label_binarize
 
 
 
-# add NUM_CLASSES, EPOCHS, LR, OPTIMIZER to config?
-
-
-
-
-# initializing model (Resnet-18)
-# should be in model.py, not done in train
-def build_model(num_classes=10, pretrained=True, freeze_layers=True):
-    """Returns a ResNet-18 model with the last layer replaced for num_classes."""
-    # not sure if V1 or V2 is better for baseline, or makes any difference
-    weights = models.ResNet18_Weights.IMAGENET1K_V1  
-    model = models.resnet18(weights=weights if pretrained else None)
-
-    # to freeze or not to freeze
-    if freeze_layers:
-        for param in model.parameters():
-            param.requires_grad = False
-
-    # replace the final layer
-    model.fc = nn.Linear(model.fc.in_features, num_classes)
-    return model
+# add EPOCHS, LR, OPTIMIZER to config?
 
 
 def save_checkpoint(model, optimizer, epoch, val_loss):
@@ -191,10 +173,9 @@ def validate_one_epoch(model, dataloader, criterion, device):
     true_class_labels = np.array(all_labels)
     predicted_class_probabilities = np.array(all_predicted_probabilities)
 
-    num_classes=10
     true_labels_one_hot = label_binarize(
         true_class_labels,
-        classes=list(range(num_classes))
+        classes=list(range(config.NUM_CLASSES))
     )
 
     # ROC-AUC macro (one-vs-rest)
@@ -228,7 +209,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     - logs losses/accuracy, f1, cm, roc-auc
     - saves best checkpoint (currently based on val_loss)
         # change to macroF1?
-        
+
     Example use:
         from supervised_soup.train import run_training
         
@@ -261,7 +242,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "epochs": epochs,
             "batch_size": config.BATCH_SIZE,
             "augmentation": with_augmentation,
-            "num_classes": 10,
+            "num_classes": config.NUM_CLASSES,
             "seed": seed,
         },
     )
@@ -271,7 +252,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     wandb.run.summary["frozen_backbone"] = True
 
 
-    model = build_model(num_classes=10, pretrained=pretrained, freeze_layers=freeze_layers)
+    model = build_model(num_classes=config.NUM_CLASSES, pretrained=pretrained, freeze_layers=freeze_layers)
     model.to(device)
 
     wandb.watch(model, log="gradients", log_freq=100)
