@@ -29,7 +29,7 @@ from sklearn.preprocessing import label_binarize
 # add EPOCHS, LR, OPTIMIZER to config?
 
 
-def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1, val_top5, val_roc_auc_macro, per_class_acc):
+def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1_macro, val_top5, val_roc_auc_macro, per_class_acc):
     """
     - Saves the best model checkpoint and uploads it as a wandb artifact.
     - updates wandb summary with key metrics for the best epoch.
@@ -45,7 +45,7 @@ def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1, val_top5
         "optimizer_state": optimizer.state_dict(),
         "val_loss": val_loss,
         "val_acc": val_acc,
-        "val_f1": val_f1,
+        "val_f1_macro": val_f1_macro,
         "val_top5": val_top5,
         "roc_auc_macro": val_roc_auc_macro,
         "per_class_acc": per_class_acc,
@@ -70,7 +70,7 @@ def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1, val_top5
     # log other metrics to wandb summary
     wandb.run.summary["best_val_loss"] = val_loss
     wandb.run.summary["best_val_acc"] = val_acc
-    wandb.run.summary["best_val_f1"] = val_f1
+    wandb.run.summary["best_val_f1_macro"] = val_f1_macro
     wandb.run.summary["best_val_top5"] = val_top5
     wandb.run.summary["best_val_roc_auc_macro"] = val_roc_auc_macro
     wandb.run.summary["best_epoch"] = epoch
@@ -316,7 +316,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     best_val_acc = 0.0
     history = {
         "train_loss": [], "train_acc": [],
-        "val_loss": [], "val_acc": [], "val_f1": [], "val_top5": [], "val_cm": []
+        "val_loss": [], "val_acc": [], "val_f1_macro": [], "val_top5": [], "val_cm": [], "val_roc_auc_macro": []
     }
 
     # for montiroing when overfitting starts
@@ -339,7 +339,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         # loss and accuracy for training
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         # get loss and other metrics for validation
-        val_loss, val_acc, val_f1, val_top5, val_cm, val_roc_auc_macro, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
+        val_loss, val_acc, val_f1_macro, val_top5, val_cm, val_roc_auc_macro, val_labels, val_predictions = validate_one_epoch(model, val_loader, criterion, device)
 
         # update overfitting
         current_metric = val_loss 
@@ -366,7 +366,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "train/accuracy": train_acc,
             "val/loss": val_loss,
             "val/accuracy": val_acc,
-            "val/f1": val_f1,
+            "val/f1_macro": val_f1_macro,
             "val/top5": val_top5,
             "val/roc_auc_macro": val_roc_auc_macro,
             "lr": current_lr,
@@ -413,7 +413,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                 epoch,
                 val_loss,
                 val_acc,
-                val_f1,
+                val_f1_macro,
                 val_top5,
                 val_roc_auc_macro,
                 per_class_acc,  # pass from run_training
@@ -434,10 +434,10 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         # prints to command line
         print(
             f"Epoch [{epoch+1}/{epochs}] "
-            f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} "
+            f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | "
             f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | "
-            f"F1: {val_f1:.4f} | Top-5: {val_top5:.4f} "
-            f"ROC-AUC Macro: {val_roc_auc_macro:.4f}"
+            f"F1: {val_f1_macro:.4f} | Top-5: {val_top5:.4f} | "
+            f"ROC-AUC Macro: {val_roc_auc_macro:.4f} | "
             f"LR: {current_lr:.6f} | "
             f"Time: {time.time() - t0:.1f}s"
         )
@@ -447,7 +447,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         history["train_acc"].append(train_acc)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
-        history["val_f1"].append(val_f1)
+        history["val_f1_macro"].append(val_f1_macro)
         history["val_top5"].append(val_top5)
         history["val_cm"].append(val_cm)
         history["val_roc_auc_macro"].append(val_roc_auc_macro)
@@ -456,7 +456,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
 
     wandb.finish()
-    print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
+    print(f"Training complete. Best Validation Acc was = {best_val_acc:.4f}.  Best Validation Loss was = {best_val_loss:.4f}")
     return model, history
 
 
