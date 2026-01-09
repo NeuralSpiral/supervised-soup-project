@@ -152,7 +152,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
 @torch.no_grad()
 def validate_one_epoch(model, dataloader, criterion, device):
     """ Validates the model for one epoch
-    currrently returns: epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm"""
+    currrently returns: epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, roc_auc_macro_ovr, all_labels, all_predictions"""
+    
     model.eval()
     running_loss = 0.0
 
@@ -207,8 +208,10 @@ def validate_one_epoch(model, dataloader, criterion, device):
     return epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm, roc_auc_macro_ovr, all_labels, all_predictions
 
 
+# TODO: refactor optimizer and scheduler creation to work with EXPERIMENT_CONFIG
+
 # the * makes teh keyword arguments mandatory
-def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, is_frozen: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
+def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, freeze_layers: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
                     # wandb (experiment metadata)
                     wandb_project: str = "x-AI-Proj-ImageClassification",
                     wandb_group: str | None = None,
@@ -221,9 +224,11 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     - loads dataloaders
     - constructs model
     - loops over epochs
-    - logs losses/accuracy
-    - saves best checkpoint
-
+    - initializes wandb and tracks metrics
+    - logs losses/accuracy, f1, cm, roc-auc
+    - saves best checkpoint (currently based on val_loss)
+        # change to macroF1?
+        
     Example use:
         from supervised_soup.train import run_training
         
@@ -245,8 +250,8 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         name=wandb_name if wandb_name else f"{run_type}_lr{lr}_aug{with_augmentation}",
         config={
             "model": "resnet18",
-            "pretrained": True,
-            "freeze_layers": True,
+            "pretrained": pretrained,
+            "freeze_layers": freeze_layers,
             "loss": "CrossEntropyLoss",
             "optimizer": "SGD",
             "momentum": 0.9,
@@ -266,7 +271,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     wandb.run.summary["frozen_backbone"] = True
 
 
-    model = build_model(num_classes=10, pretrained=pretrained, freeze_layers=is_frozen)
+    model = build_model(num_classes=10, pretrained=pretrained, freeze_layers=freeze_layers)
     model.to(device)
 
     wandb.watch(model, log="gradients", log_freq=100)
