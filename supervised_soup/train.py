@@ -29,7 +29,7 @@ from sklearn.preprocessing import label_binarize
 # add EPOCHS, LR, OPTIMIZER to config?
 
 
-def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1_macro, val_top5, val_roc_auc_macro, per_class_acc):
+def save_best_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1_macro, val_top5, val_roc_auc_macro, per_class_acc):
     """
     - Saves the best model checkpoint and uploads it as a wandb artifact.
     - updates wandb summary with key metrics for the best epoch.
@@ -407,7 +407,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             best_val_labels = val_labels
             best_val_predictions = val_predictions
 
-            save_checkpoint(
+            save_best_checkpoint(
                 model,
                 optimizer,
                 epoch,
