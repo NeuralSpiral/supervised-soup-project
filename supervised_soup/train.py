@@ -218,24 +218,9 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         project=wandb_project,
         entity="neural-spi-university",
         group=wandb_group,
-        name=wandb_name if wandb_name else f"{run_type}_lr{lr}_aug{with_augmentation}",
-        config={
-            "model": "resnet18",
-            "pretrained": pretrained,
-            "freeze_layers": freeze_layers,
-            "loss": "CrossEntropyLoss",
-            "optimizer": "SGD",
-            "momentum": 0.9,
-            "scheduler": "CosineAnnealingLR",
-            "learning_rate": lr,
-            "min_lr": 1e-6,
-            "epochs": epochs,
-            "batch_size": config.BATCH_SIZE,
-            "augmentation": with_augmentation,
-            "num_classes": config.NUM_CLASSES,
-            "seed": seed,
-        },
-    )
+        name=wandb_name if wandb_name else run_type,)
+    
+
     # update wandb config to include additional keys specified in notebook
     if experiment_config is not None:
         wandb.config.update(experiment_config, allow_val_change=False)
@@ -254,7 +239,8 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
     model = build_model(num_classes=config.NUM_CLASSES, pretrained=pretrained, freeze_layers=freeze_layers)
     model.to(device)
 
-    wandb.watch(model, log="gradients", log_freq=100)
+    # Optional for logging gradients, can introduce significant overhead esepcially with log_graph=True
+    # wandb.watch(model, log="gradients", log_freq=100, log_graph=False)
 
     # Loss function and optimizer: set to CrossEntropy and SGD for now
     criterion = nn.CrossEntropyLoss()
