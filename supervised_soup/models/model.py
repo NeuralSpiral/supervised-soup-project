@@ -1,32 +1,96 @@
 """
-Provides a build_model function that returns a ResNet-18 model with the last layer replaced for num_classes.
-    
+Provides a build_model function that returns a ResNet model with the last layer replaced for num_classes.
 """
-
 
 import torch.nn as nn
 from torchvision import models
 import supervised_soup.config as config
 
+
+RESNET_MODELS = {
+    "resnet18": models.resnet18,
+    "resnet34": models.resnet34,
+    "resnet50": models.resnet50,
+    "resnet101": models.resnet101,
+}
+
+
+FREEZE_STAGE_NAMES = {
+    "conv1",
+    "bn1",
+    "layer1",
+    "layer2",
+    "layer3",
+    "layer4",
+}
+
+
+def _freeze_until(model, freeze_until: str):
+    """
+    Freeze all modules up to and including `freeze_until`.
+    """
+    if freeze_until not in FREEZE_STAGE_NAMES:
+        raise ValueError(
+            f"freeze_until must be one of {FREEZE_STAGE_NAMES}, "
+            f"got {freeze_until}"
+        )
+
+    freezing = True
+    for name, module in model.named_children():
+        if freezing:
+            for param in module.parameters():
+                param.requires_grad = False
+        if name == freeze_until:
+            freezing = False
+
+
+def print_trainable_layers(model):
+    """
+    Prints each top-level module name and whether it has trainable parameters.
+    Useful to debug freeze_layers / freeze_until settings.
+    """
+    print("Trainable layers:")
+    for name, module in model.named_children():
+        trainable = any(p.requires_grad for p in module.parameters())
+        print(f"  {name}: {'trainable' if trainable else 'frozen'}")
+
+
 # Build the model
-def build_model(num_classes=config.NUM_CLASSES, pretrained=True, freeze_layers=True):
-    """Returns a ResNet-18 model with the last layer replaced for num_classes.
+def build_model(
+    model_name="resnet18",
+    num_classes=config.NUM_CLASSES,
+    pretrained=True,
+    freeze_layers=True,
+    freeze_until=None,
+):
+    """Returns a ResNet model with the last layer replaced for num_classes.
     - If pretrained = True, loads pretrained Imagenet weights (V1)
-    - If freeze layers = True, all layers will be frozen except the final layer
+    - If freeze_layers = True, all layers will be frozen except the final layer
+    - With freeze_until you can specify up to which layer to freeze (using the semantic resnet block/stage names)
     - model (not yet moved to device!)"""
-    
+
+    if model_name not in RESNET_MODELS:
+        raise ValueError(
+            f"Unsupported model_name '{model_name}'. "
+            f"Choose from {list(RESNET_MODELS.keys())}"
+        )
+
     # initializes model with or without pretrained weights 
     if pretrained:
-        # not sure if V1 or V2 is better , or makes any difference, should just stay consistent
+        # not sure if V1 or V2 is better, or makes any difference, should just stay consistent
         weights = models.ResNet18_Weights.IMAGENET1K_V1
     else:
         weights = None
-    model = models.resnet18(weights=weights)
+
+    # select the model based on model_name
+    model = RESNET_MODELS[model_name](weights=weights)
 
     # to freeze or not to freeze
     if freeze_layers:
         for param in model.parameters():
             param.requires_grad = False
+    elif freeze_until is not None:
+        _freeze_until(model, freeze_until)
 
     # get the number of input features
     in_features = model.fc.in_features
@@ -34,5 +98,11 @@ def build_model(num_classes=config.NUM_CLASSES, pretrained=True, freeze_layers=T
 
     # Replace the final layer with a new one for our dataset
     model.fc = nn.Linear(in_features, num_classes)
-    return model
 
+    # ensure classifier is always trainable
+    for param in model.fc.parameters():
+        param.requires_grad = True
+
+    print_trainable_layers(model)
+    
+    return model
