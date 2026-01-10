@@ -18,6 +18,7 @@ from supervised_soup.dataloader import get_dataloaders
 import supervised_soup.config as config
 from supervised_soup import seed as seed_module
 from supervised_soup.models.model import build_model
+from supervised_soup import checkpoints
 
 
 from sklearn.metrics import accuracy_score, f1_score, top_k_accuracy_score, confusion_matrix
@@ -27,54 +28,6 @@ from sklearn.preprocessing import label_binarize
 
 
 # add EPOCHS, LR, OPTIMIZER to config?
-
-
-def save_checkpoint(model, optimizer, epoch, val_loss, val_acc, val_f1_macro, val_top5, val_roc_auc_macro, per_class_acc):
-    """
-    - Saves the best model checkpoint and uploads it as a wandb artifact.
-    - updates wandb summary with key metrics for the best epoch.
-    """
-
-    # path in run directory (temporary)
-    checkpoint_path = os.path.join(wandb.run.dir, f"best_model_{wandb.run.name}.pt")
-
-    # Save checkpoint
-    checkpoint = {
-        "epoch": epoch,
-        "model_state": model.state_dict(),
-        "optimizer_state": optimizer.state_dict(),
-        "val_loss": val_loss,
-        "val_acc": val_acc,
-        "val_f1_macro": val_f1_macro,
-        "val_top5": val_top5,
-        "roc_auc_macro": val_roc_auc_macro,
-        "per_class_acc": per_class_acc,
-    }
-    torch.save(checkpoint, checkpoint_path)
-
-    # Create wandb artifact (permanent)
-    # We can use it for later analysis, or Grad-CAM
-    artifact = wandb.Artifact(
-        name=f"best_model_{wandb.run.name}",
-        type="model",
-        description=f"Best model at epoch {epoch}",
-    )
-    artifact.add_file(checkpoint_path)
-    wandb.log_artifact(artifact)
-
-
-    # log per-class accuracy to wandb summary
-    for cls, acc in per_class_acc.items():
-        wandb.run.summary[f"best/{cls}_acc"] = acc
-
-    # log other metrics to wandb summary
-    wandb.run.summary["best_val_loss"] = val_loss
-    wandb.run.summary["best_val_acc"] = val_acc
-    wandb.run.summary["best_val_f1_macro"] = val_f1_macro
-    wandb.run.summary["best_val_top5"] = val_top5
-    wandb.run.summary["best_val_roc_auc_macro"] = val_roc_auc_macro
-    wandb.run.summary["best_epoch"] = epoch
-
 
 
 # add per class acc
@@ -227,7 +180,7 @@ def validate_one_epoch(model, dataloader, criterion, device):
 
 # TODO: refactor optimizer and scheduler creation to work with EXPERIMENT_CONFIG
 
-# the * makes teh keyword arguments mandatory
+# the * makes the keyword arguments mandatory
 def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained: bool =True, freeze_layers: bool =True,  lr: float = 1e-3, device: str = config.DEVICE, seed: int = config.SEED,
                     # wandb (experiment metadata)
                     wandb_project: str = "x-AI-Proj-ImageClassification",
@@ -235,7 +188,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                     wandb_name: str | None = None,
                     run_type: str = "baseline",
                      # for resuming from last checkpoint, in case
-                     current_last_checkpoint_path: str | None = None ):
+                    resume: bool = False):
     """
     Main training function:
     - loads dataloaders
@@ -282,6 +235,11 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "seed": seed,
         },
     )
+
+    # This sets the label on x-axis in wandb plots from the default step to epoch
+    # We won't need to manually change it in the UI anymore
+    wandb.define_metric("*", step_metric="epoch")
+
     # wandb run-level metadata
     wandb.run.summary["run_type"] = run_type
     wandb.run.summary["model"] = "resnet18"
@@ -295,19 +253,32 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
     # Loss function and optimizer: set to CrossEntropy and SGD for now
     criterion = nn.CrossEntropyLoss()
-    # added filter to avoid iterating over frozen parameters
+    # Added filter to avoid iterating over frozen parameters
     optimizer = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()),
         lr=lr, momentum=0.9,)
 
-    # for resuming from last checkpoint
-    start_epoch = 0  # default
-    if current_last_checkpoint_path is not None and os.path.exists(current_last_checkpoint_path):
-        print(f"Resuming training from checkpoint: {current_last_checkpoint_path}")
-        checkpoint = torch.load(current_last_checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint["model_state"])
-        optimizer.load_state_dict(checkpoint["optimizer_state"])
-        start_epoch = checkpoint["epoch"] + 1
+
+    # For saving last checkpoint
+    local_last_ckpt_path = config.CHECKPOINTS_PATH / "last_checkpoint.pt"
+    checkpoint_upload_interval = config.CHECKPOINT_UPLOAD_INTERVAL 
+
+
+    # For resuming from last checkpoint, updated with resume argument
+    start_epoch = 0  
+    if resume:
+        checkpoint = checkpoints.try_resume_from_wandb(device=device)
+        if checkpoint is not None:
+            print("Resuming training from wandb checkpoint artifact")
+            model.load_state_dict(checkpoint["model_state"])
+            optimizer.load_state_dict(checkpoint["optimizer_state"])
+            # starting epoch comes now from the checkpoint
+            start_epoch = checkpoint["epoch"] + 1
+
+    # Check for resume
+    assert 0 <= start_epoch < epochs, f"Invalid start_epoch={start_epoch} for epochs={epochs}"
     
+
+    # Scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=epochs, eta_min=1e-6, last_epoch=start_epoch - 1)
 
@@ -371,30 +342,25 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             "val/roc_auc_macro": val_roc_auc_macro,
             "lr": current_lr,
             "epoch_time": time.time() - t0,
-        }
-
-        log_data.update({
             "diagnostics/best_val_loss": best_val_metric,
             "diagnostics/epochs_since_val_improvement": epochs_since_improvement,
             "diagnostics/overfitting_flag": int(overfitting_flag),
-        })
+        }
 
 
         for cls, acc in per_class_acc.items():
             log_data[f"val/per_class_acc/class_{cls}"] = acc
 
 
-        wandb.log(log_data, step=epoch)
+        wandb.log(log_data, step=epoch + 1)
 
         # save the last checkpoint (overwritten each epoch)
-        current_last_checkpoint_path = os.path.join(wandb.run.dir, f"last_model_{wandb.run.name}.pt")
-        torch.save({
-            "epoch": epoch,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "val_loss": val_loss,
-            "val_accuracy": val_acc,
-        }, current_last_checkpoint_path)
+        checkpoints.save_last_checkpoint(model=model, optimizer=optimizer, epoch=epoch, path=local_last_ckpt_path)
+        # upload artifact
+        checkpoints.upload_last_checkpoint_artifact(local_checkpoint_path=local_last_ckpt_path,
+                                                    epoch=epoch,
+                                                    upload_interval=checkpoint_upload_interval)      
+
 
         # Save best checkpoint and cm and store as artifact (with wandb)
         if val_loss < best_val_loss:
@@ -402,23 +368,22 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
             best_val_acc = val_acc
             best_epoch = epoch + 1  
 
+            checkpoints.save_best_checkpoint(
+                model=model,
+                optimizer=optimizer,
+                epoch=epoch,
+                val_loss=val_loss,
+                val_acc=val_acc,
+                val_f1_macro=val_f1_macro,
+                val_top5=val_top5,
+                val_roc_auc_macro=val_roc_auc_macro,
+                per_class_acc=per_class_acc,
+            )
+            
             # best confusion matrix
             best_cm = val_cm
             best_val_labels = val_labels
             best_val_predictions = val_predictions
-
-            save_checkpoint(
-                model,
-                optimizer,
-                epoch,
-                val_loss,
-                val_acc,
-                val_f1_macro,
-                val_top5,
-                val_roc_auc_macro,
-                per_class_acc,  # pass from run_training
-            )
-
             # log cm for best epoch
             log_best_confusion_matrix(
                 y_true=best_val_labels,
@@ -426,9 +391,7 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                 class_names=[f"class_{i}" for i in range(10)],
                 epoch=best_epoch,
             )
-
-            wandb.run.summary["best_val_acc"] = best_val_acc
-            wandb.run.summary["best_epoch"] = best_epoch          
+       
 
 
         # prints to command line
@@ -451,7 +414,6 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
         history["val_top5"].append(val_top5)
         history["val_cm"].append(val_cm)
         history["val_roc_auc_macro"].append(val_roc_auc_macro)
-
 
 
 

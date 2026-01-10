@@ -45,6 +45,9 @@ CHECKPOINTS_PATH.mkdir(parents=True, exist_ok=True)
 LOGS_PATH.mkdir(parents=True, exist_ok=True)
 VISUALIZATIONS_PATH.mkdir(parents=True, exist_ok=True)
 
+# Epoch interval for last checkpoint artifact uploads
+CHECKPOINT_UPLOAD_INTERVAL = 5
+
 
 
 # we might want to adjust these
