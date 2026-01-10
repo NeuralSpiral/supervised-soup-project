@@ -41,6 +41,80 @@ def build_model(num_classes=10, pretrained=True, freeze_layers=True):
     return model.to(config.DEVICE)
 
 
+# function that builds an optimizer
+def build_optimizer(
+    optimizer_name: str,
+    params,
+    lr: float,
+    weight_decay: float = 1e-4,
+    momentum: float = 0.9,
+):
+    """
+    Builds optimizer based on optimizer_name.
+    Not sure, which optimizers we want to use in the end, so I added the ones we've discussed.
+    Supported:
+        - "sgd"
+        - "adam"
+        - "adamw"
+        - "adagrad"
+        - "rmsprop"
+    """
+    name = optimizer_name.lower()
+
+    if name == "sgd":
+        return optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+
+    elif name == "adam":
+        return optim.Adam(params, lr=lr, weight_decay=weight_decay)
+
+    elif name == "adamw":
+        return optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+
+    elif name == "adagrad":
+        return optim.Adagrad(params, lr=lr, weight_decay=weight_decay)
+
+    elif name == "rmsprop":
+        return optim.RMSprop(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+
+    else:
+        raise ValueError(
+            f"Unknown optimizer: {optimizer_name}. "
+            f"Choose from: sgd, adam, adamw, adagrad, rmsprop."
+        )
+    
+
+# function that builds a scheduler
+def build_scheduler(
+    scheduler_name: str,
+    optimizer,
+    epochs: int,
+    step_size: int = 10,
+    gamma: float = 0.1,
+):
+    """
+    Builds a learning rate scheduler.
+    As far as I remember we've only discussed cosine annealing so far.
+    Supported:
+        - "none"
+        - "cosine"
+    """
+    name = scheduler_name.lower()
+
+    if name in ["none", "", "null"]:
+        return None
+
+    if name == "cosine":
+        return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    else:
+        raise ValueError(
+            f"Unknown scheduler: {scheduler_name}. "
+            f"Choose from: none, cosine."
+        )
+    
+
+
+
 def save_checkpoint(model, optimizer, epoch, loss):
     """ Saves a model checkpoint"""
 
@@ -139,7 +213,18 @@ def validate_one_epoch(model, loader, criterion, device):
     return epoch_loss, epoch_acc, epoch_f1, epoch_top5, epoch_cm
 
 
-def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e-3, device: str = config.DEVICE):
+def run_training(
+        epochs: int = 5, 
+        with_augmentation: bool =False, 
+        pretrained: bool = True,
+        freeze_layers: bool = True,
+        lr: float = 1e-3, 
+        device: str = config.DEVICE,
+        optimizer_name: str = "sgd",  # I put sgd as a default value
+        scheduler_name: str = "cosine",
+        weight_decay: float = 1e-4,
+        momentum: float = 0.9,
+):
     """
     Main training function:
     - loads dataloaders
@@ -151,6 +236,9 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
     Example use:
         from supervised_soup.train import train_baseline
         results = train_baseline(epochs=10)
+        optimizer_name="adamw",
+        scheduler_name="cosine",
+        lr=3e-4
     """
     # set seed for reproducibility
     seed_module.set_seed(config.SEED)
@@ -160,19 +248,39 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
         with_augmentation=with_augmentation
     )
 
-    model = build_model(num_classes=10, pretrained=True, freeze_layers=True)
+    model = build_model(num_classes=10, pretrained=pretrained, freeze_layers=freeze_layers)
     model.to(device)
 
-    # Loss function and optimizer: set to CrossEntropy and SGD for now
+    # Loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr)
+    
+    trainable_params = (p for p in model.parameters() if p.requires_grad)
+
+    optimizer = build_optimizer(
+        optimizer_name=optimizer_name,
+        params=trainable_params,
+        lr=lr,
+        weight_decay=weight_decay,
+        momentum=momentum,
+    )
+
+    scheduler = build_scheduler(
+        scheduler_name=scheduler_name,
+        optimizer=optimizer,
+        epochs=epochs,
+    )
 
     best_val_acc = 0.0
     history = {
         "train_loss": [], "train_acc": [],
-        "val_loss": [], "val_acc": [], "val_f1": [], "val_top5": [], "val_cm": []
+        "val_loss": [], "val_acc": [], "val_f1": [], "val_top5": [], "val_cm": [],
+        "lr": [],
     }
 
+    print(
+        f"Starting training | optimizer={optimizer_name} | scheduler={scheduler_name} | "
+        f"lr={lr} | epochs={epochs} | pretrained={pretrained} | freeze_layers={freeze_layers}"
+    )
 
     for epoch in range(epochs):
         t0 = time.time()
@@ -181,6 +289,9 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         # get loss and other metrics for validation
         val_loss, val_acc, val_f1, val_top5, val_cm = validate_one_epoch(model, val_loader, criterion, device)
+
+        current_lr = optimizer.param_groups[0]["lr"]
+        history["lr"].append(current_lr)
 
         # Logging placeholder for wb (or something else)
         print(
@@ -206,6 +317,9 @@ def run_training(epochs: int = 5, with_augmentation: bool =False, lr: float = 1e
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             save_checkpoint(model, optimizer, epoch, val_loss)
+
+        if scheduler is not None:
+            scheduler.step()
 
     print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
     return model, history
