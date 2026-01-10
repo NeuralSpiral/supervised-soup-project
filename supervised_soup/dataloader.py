@@ -59,6 +59,7 @@ baseline_transforms = validation_transforms
 train_transforms = transforms.Compose([
     transforms.RandomResizedCrop(224),
     transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
     transforms.ToTensor(),
     transforms.Normalize(
         mean=MEAN,
