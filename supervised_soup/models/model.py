@@ -14,6 +14,12 @@ RESNET_MODELS = {
     "resnet101": models.resnet101,
 }
 
+RESNET_WEIGHTS = {
+    "resnet18": models.ResNet18_Weights.IMAGENET1K_V1,
+    "resnet34": models.ResNet34_Weights.IMAGENET1K_V1,
+    "resnet50": models.ResNet50_Weights.IMAGENET1K_V1,
+    "resnet101": models.ResNet101_Weights.IMAGENET1K_V1,
+}
 
 FREEZE_STAGE_NAMES = {
     "conv1",
@@ -28,6 +34,7 @@ FREEZE_STAGE_NAMES = {
 def _freeze_until(model, freeze_until: str):
     """
     Freeze all modules up to and including `freeze_until`.
+
     """
     if freeze_until not in FREEZE_STAGE_NAMES:
         raise ValueError(
@@ -66,8 +73,18 @@ def build_model(
     """Returns a ResNet model with the last layer replaced for num_classes.
     - If pretrained = True, loads pretrained Imagenet weights (V1)
     - If freeze_layers = True, all layers will be frozen except the final layer
-    - With freeze_until you can specify up to which layer to freeze (using the semantic resnet block/stage names)
-    - model (not yet moved to device!)"""
+    - With freeze_until you can specify up to which layer to freeze (using the semantic resnet stage names)
+    - freeze_until requires freeze_layers=False
+    - model (not yet moved to device!)
+    - How freeze_until works:
+        - Freezes all ResNet stages up to and including the specified stage
+        - Valid values: conv1, bn1, layer1, layer2, layer3, layer4
+        - (unfreezing below layer1 or 2 probably won't make sense for us)
+        - Example:
+            freeze_until="layer3" -> only layer4 + fc trainable
+            freeze_until="layer4" would be identical to freeze_layers=True
+    """
+    
 
     if model_name not in RESNET_MODELS:
         raise ValueError(
@@ -78,7 +95,7 @@ def build_model(
     # initializes model with or without pretrained weights 
     if pretrained:
         # not sure if V1 or V2 is better, or makes any difference, should just stay consistent
-        weights = models.ResNet18_Weights.IMAGENET1K_V1
+        weights = RESNET_WEIGHTS[model_name]
     else:
         weights = None
 
