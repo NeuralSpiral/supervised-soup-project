@@ -84,35 +84,66 @@ def build_optimizer(
     
 
 # function that builds a scheduler
-def build_scheduler(
-    scheduler_name: str,
-    optimizer,
-    epochs: int,
-    step_size: int = 10,
-    gamma: float = 0.1,
-):
+def build_scheduler(scheduler_name, optimizer, epochs, **kwargs):
     """
-    Builds a learning rate scheduler.
-    As far as I remember we've only discussed cosine annealing so far.
-    Supported:
-        - "none"
-        - "cosine"
+    LR schedulers.
+    Supported schedulers:
+      - none
+      - cosine
+      - cosine_warm
+      - step
+      - multistep
+      - plateau
     """
+
     name = scheduler_name.lower()
 
     if name in ["none", "", "null"]:
         return None
 
     if name == "cosine":
-        return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+        eta_min = kwargs.get("eta_min", 1e-6)
+        return optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=epochs, eta_min=eta_min
+        )
+
+    elif name == "cosine_warm":
+        t_0 = kwargs.get("t_0", 10)
+        t_mult = kwargs.get("t_mult", 1)
+        eta_min = kwargs.get("eta_min", 1e-6)
+        return optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer, T_0=t_0, T_mult=t_mult, eta_min=eta_min
+        )
+
+    elif name == "step":
+        step_size = kwargs.get("step_size", max(1, epochs // 3))
+        gamma = kwargs.get("gamma", 0.1)
+        return optim.lr_scheduler.StepLR(
+            optimizer, step_size=step_size, gamma=gamma
+        )
+
+    elif name == "multistep":
+        milestones = kwargs.get(
+            "milestones", [epochs // 2, int(epochs * 0.75)]
+        )
+        gamma = kwargs.get("gamma", 0.1)
+        return optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=milestones, gamma=gamma
+        )
+
+    elif name == "plateau":
+        factor = kwargs.get("factor", 0.1)
+        patience = kwargs.get("patience", 3)
+        min_lr = kwargs.get("min_lr", 1e-6)
+        return optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=factor, patience=patience, min_lr=min_lr
+        )
 
     else:
         raise ValueError(
             f"Unknown scheduler: {scheduler_name}. "
-            f"Choose from: none, cosine."
+            f"Choose from: none, cosine, cosine_warm, step, multistep, plateau."
         )
-    
-
 
 
 def save_checkpoint(model, optimizer, epoch, loss):
@@ -224,6 +255,8 @@ def run_training(
         scheduler_name: str = "cosine",
         weight_decay: float = 1e-4,
         momentum: float = 0.9,
+        scheduler_kwargs: dict | None = None,
+
 ):
     """
     Main training function:
@@ -268,6 +301,7 @@ def run_training(
         scheduler_name=scheduler_name,
         optimizer=optimizer,
         epochs=epochs,
+        **(scheduler_kwargs or {})
     )
 
     best_val_acc = 0.0
@@ -319,7 +353,11 @@ def run_training(
             save_checkpoint(model, optimizer, epoch, val_loss)
 
         if scheduler is not None:
-            scheduler.step()
+            if scheduler_name.lower() == "plateau":
+                scheduler.step(val_loss)
+            else:
+                scheduler.step()
+
 
     print(f"Training complete. Best Validation Acc = {best_val_acc:.4f}")
     return model, history

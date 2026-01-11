@@ -33,6 +33,8 @@ def test_run_training():
     assert len(history["val_acc"]) == 1, "Validation metrics missing"
     print("Default config test passed!")
 
+    return history
+
 def test_run_training_multiple_optimizers():
     """Test that run_training works with different optimizers."""
     optimizers = ["sgd", "adam", "adamw", "rmsprop", "adagrad"]
@@ -80,6 +82,27 @@ def test_run_training_scheduler_changes_lr():
     # LR should change at least once
     assert len(set(lr_values)) > 1, "Learning rate did not change across epochs"
     print("Scheduler LR-change test passed!")
+
+
+def test_scheduler_kwargs():
+    """Test scheduler_kwargs are accepted and used."""
+    print("\n[TEST] Scheduler kwargs = cosine eta_min")
+
+    test_checkpoint_path = Path("test_results/scheduler_kwargs")
+    test_checkpoint_path.mkdir(parents=True, exist_ok=True)
+    config.CHECKPOINTS_PATH = test_checkpoint_path
+
+    model, history = run_training(
+        epochs=2,
+        with_augmentation=False,
+        lr=0.01,
+        optimizer_name="sgd",
+        scheduler_name="cosine",
+        scheduler_kwargs={"eta_min": 1e-5},
+    )
+
+    assert "lr" in history, "LR history missing"
+    print("Scheduler kwargs test passed!")
 
 
 if __name__ == "__main__":
