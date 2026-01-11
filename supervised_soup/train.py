@@ -189,7 +189,9 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
                     run_type: str = "baseline",
                      # for resuming from last checkpoint, in case
                     resume: bool = False,
-                    experiment_config=None):
+                    experiment_config=None,
+                    freeze_until: str | None = None,
+                    model_name: str = "resnet18",):
     """
     Main training function:
     - loads dataloaders
@@ -232,11 +234,18 @@ def run_training(*, epochs: int = 5, with_augmentation: bool =False, pretrained:
 
     # wandb run-level metadata
     wandb.run.summary["run_type"] = run_type
-    wandb.run.summary["model"] = "resnet18"
-    wandb.run.summary["frozen_backbone"] = True
+    wandb.run.summary["model"] = model_name
+    wandb.run.summary["frozen_backbone"] = freeze_layers
+    wandb.run.summary["freeze_until"] = freeze_until
 
 
-    model = build_model(num_classes=config.NUM_CLASSES, pretrained=pretrained, freeze_layers=freeze_layers)
+    model = build_model(
+        model_name=model_name,
+        num_classes=config.NUM_CLASSES,
+        pretrained=pretrained,
+        freeze_layers=freeze_layers,
+        freeze_until=freeze_until,)
+
     model.to(device)
 
     # Optional for logging gradients, can introduce significant overhead esepcially with log_graph=True
