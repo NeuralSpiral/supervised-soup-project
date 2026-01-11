@@ -40,11 +40,48 @@ def test_class_mapping():
     print("Classes:", dataset.classes)
     print("Class → Index:", dataset.class_to_idx)
 
+# test that the new augmentation presets work
+def test_augmentation_presets():
+    presets = ["light", "strong", "autoaugment"]
+
+    for preset in presets:
+        print(f"\n--- Testing augmentation preset: {preset} ---")
+        train_loader, _ = get_dataloaders(
+            with_augmentation=True,
+            augmentation_preset=preset,
+        )
+
+        images, labels = next(iter(train_loader))
+        print("Images:", images.shape)
+        print("Labels:", labels.shape)
+        print("Dtype:", images.dtype)
+        print("Range:", images.min().item(), images.max().item())
+
+
+# test that augmentation_kwargs are accepted
+def test_augmentation_kwargs():
+    print("\n--- Testing augmentation kwargs (strong preset) ---")
+    train_loader, _ = get_dataloaders(
+        with_augmentation=True,
+        augmentation_preset="strong",
+        augmentation_kwargs={
+            "noise_std": 0.03,
+            "random_erasing_p": 0.5,
+        },
+    )
+
+    images, labels = next(iter(train_loader))
+    print("Images:", images.shape)
+    print("Labels:", labels.shape)
+    print("Dtype:", images.dtype)
+    print("Range:", images.min().item(), images.max().item())
+
 
 test_batch()
 test_epoch_loading()
 test_class_mapping()
-
+test_augmentation_presets()
+test_augmentation_kwargs()
 
 
 ##### visualizing some images 
@@ -88,5 +125,35 @@ def visualize_batch():
     plt.tight_layout()
     plt.show()
 
+# visualize augmentations 
+def visualize_batch_augmented(preset="light", augmentation_kwargs=None):
+    train_loader, _ = get_dataloaders(
+        with_augmentation=True,
+        augmentation_preset=preset,
+        augmentation_kwargs=augmentation_kwargs,
+    )
+    images, labels = next(iter(train_loader))
+    dataset = train_loader.dataset
+
+    plt.figure(figsize=(10, 10))
+    for i in range(9):
+        plt.subplot(3, 3, i + 1)
+        show_image(images[i])
+
+        filepath = dataset.imgs[i][0]
+        filename = os.path.basename(filepath)
+
+        plt.title(f"{preset}: {filename}", fontsize=8)
+        plt.axis("off")
+
+    plt.tight_layout()
+    plt.show()
 
 visualize_batch()
+
+# quick visual check for presets
+visualize_batch_augmented("light")
+visualize_batch_augmented("strong", {"noise_std": 0.03, "random_erasing_p": 0.5})
+visualize_batch_augmented("autoaugment")
+
+
