@@ -104,12 +104,54 @@ def test_scheduler_kwargs():
     assert "lr" in history, "LR history missing"
     print("Scheduler kwargs test passed!")
 
+def test_run_training_label_smoothing_enabled():
+    """Test that run_training works with label smoothing enabled."""
+    print("\n[TEST] Label smoothing enabled")
+
+    test_checkpoint_path = Path("test_results/label_smoothing")
+    test_checkpoint_path.mkdir(parents=True, exist_ok=True)
+    config.CHECKPOINTS_PATH = test_checkpoint_path
+
+    model, history = run_training(
+        epochs=1,
+        with_augmentation=False,
+        lr=0.01,
+        optimizer_name="sgd",
+        scheduler_name="none",
+        use_label_smoothing=True,
+        label_smoothing=0.1,
+    )
+
+    assert len(history["train_loss"]) == 1
+    assert len(history["val_loss"]) == 1
+    print("Label smoothing test passed!")
+
+def test_run_training_label_smoothing_invalid_value_raises():
+    """Test that invalid label_smoothing values raise ValueError."""
+    print("\n[TEST] Label smoothing invalid value raises")
+
+    try:
+        run_training(
+            epochs=1,
+            with_augmentation=False,
+            lr=0.01,
+            optimizer_name="sgd",
+            scheduler_name="none",
+            use_label_smoothing=True,
+            label_smoothing=1.0,  # invalid (must be < 1.0)
+        )
+        assert False, "Expected ValueError for label_smoothing=1.0"
+    except ValueError:
+        pass
+
 
 if __name__ == "__main__":
     history = test_run_training()
     test_run_training()
     test_run_training_multiple_optimizers()
     test_run_training_scheduler_changes_lr()
+    test_run_training_label_smoothing_enabled()
+    test_run_training_label_smoothing_invalid_value_raises()
 
     print("All training tests passed!")
 
